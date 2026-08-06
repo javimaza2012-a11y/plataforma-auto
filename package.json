@@ -20,10 +20,8 @@
     "express": "^5.2.1",
     "multer": "^2.2.0",
     "mupdf": "^1.28.0",
-    "open": "^11.0.0",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
-    "pdfjs-dist": "^6.2.108",
     "tesseract.js": "^7.0.0"
   },
   "optionalDependencies": {
