@@ -2,12 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { PDFDocument } = require('pdf-lib');
 const { createWorker } = require('tesseract.js');
-let pdfParse = null;
-try {
-  pdfParse = require('pdf-parse');
-} catch (e) {
-  console.warn('[PDF-PARSE] Safe load fallback:', e.message);
-}
+
 
 let mupdfModule = null;
 async function getMupdf() {
@@ -531,106 +526,57 @@ async function parseBR1(pdfBuffer, filename) {
     console.log(`[BR1] Procesando PDF BR1 "${filename}"...`);
     const extractedItems = [];
 
-    // Intentar primero extracción de texto digital nativo con pdf-parse
-    let parseResult = null;
-    try {
-      parseResult = await pdfParse(pdfBuffer);
-    } catch (e) {
-      console.log('[BR1] Falló pdf-parse nativo, recurriendo a OCR...', e.message);
-    }
+    const mupdf = await getMupdf();
+    const doc = mupdf.Document.openDocument(pdfBuffer, 'application/pdf');
+    const pageCount = doc.countPages();
+    const srcDoc = await PDFDocument.load(pdfBuffer);
 
-    if (parseResult && parseResult.text && parseResult.text.includes('Descargar documento')) {
-      console.log('[BR1] Extracción de texto digital SAP vía pdf-parse exitosa!');
-      const pagesText = parseResult.text.split('Descargar documento (BR1)');
-
-      pagesText.slice(1).forEach((pText, i) => {
-        // 1. Número de Pedido de 10 dígitos arriba del código de barras
-        const poMatch = pText.match(/(?:PO|PEDIDO|COMPRAS)?\s*\n?\s*(180[0-9]{7}|176[0-9]{7}|45[0-9]{8}|46[0-9]{8}|[0-9]{10})/i);
-        const docNumberFull = poMatch ? poMatch[1] : '';
-        const docNumberLast4 = docNumberFull ? docNumberFull.slice(-4) : '';
-
-        // 2. Control, Sección, Código de Proveedor y Nombre de Proveedor
-        // Ej: "D03E301AZUQUECA", "D0246096PUERTAS PROMA SA", "D0746205MOLECOR CANALIZACIO", "C0646159FUTURBANO SL"
-        const detailMatch = pText.match(/([DC])\s*(0[1-9])\s*([A-Z0-9]{4,5})\s*([^\n\r]+)/);
-        let controlType = 'D', section = '', providerName = '';
-        if (detailMatch) {
-          controlType = detailMatch[1];
-          section = detailMatch[2]; // "03", "02", "07", "06", "01"
-          providerName = detailMatch[4].trim();
-          if (providerName.includes('ZUQUECA')) providerName = 'AZUQUECA';
-        }
-
-        extractedItems.push({
-          pageIndex: i + 1,
-          controlType,
-          controlLabel: controlType === 'C' ? 'C' : 'D',
-          section, // Estrictamente 2 dígitos o vacío. NUNCA '05' por defecto.
-          docNumberFull,
-          docNumberLast4, // 4 últimos dígitos del pedido de 10 dígitos arriba del código de barras
-          providerName,
-          rawLine: pText.substring(0, 300)
-        });
-      });
-
-      // Adjuntar buffer de cada página individual para el montaje de impresión
+    for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+      const page = doc.loadPage(pageIdx);
+      let pText = '';
       try {
-        const srcDoc = await PDFDocument.load(pdfBuffer);
-        for (let idx = 0; idx < extractedItems.length; idx++) {
-          const singleDoc = await PDFDocument.create();
-          const [cp] = await singleDoc.copyPages(srcDoc, [idx]);
-          singleDoc.addPage(cp);
-          extractedItems[idx].buffer = Buffer.from(await singleDoc.save());
-        }
-      } catch (err) {
-        console.error('Error extrayendo buffers de páginas BR1:', err);
+        pText = page.toStructuredText().asText() || '';
+      } catch (e) {
+        pText = '';
       }
-    } else {
-      // Fallback a OCR por página si no es PDF vectorial con texto nativo
-      const mupdf = await getMupdf();
-      const doc = mupdf.Document.openDocument(pdfBuffer, 'application/pdf');
-      const pageCount = doc.countPages();
-      const srcDoc = await PDFDocument.load(pdfBuffer);
 
-      for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+      // 1. Número de Pedido de 10 dígitos arriba del código de barras
+      const poMatch = pText.match(/(?:PO|PEDIDO|COMPRAS)?\s*\n?\s*(180[0-9]{7}|176[0-9]{7}|45[0-9]{8}|46[0-9]{8}|[0-9]{10})/i);
+      const docNumberFull = poMatch ? poMatch[1] : '';
+      const docNumberLast4 = docNumberFull ? docNumberFull.slice(-4) : '';
+
+      // 2. Control, Sección, Código de Proveedor y Nombre de Proveedor
+      const detailMatch = pText.match(/([DC])\s*(0[1-9])\s*([A-Z0-9]{4,5})\s*([^\n\r]+)/);
+      let controlType = 'D', section = '', providerName = '';
+      if (detailMatch) {
+        controlType = detailMatch[1];
+        section = detailMatch[2];
+        providerName = detailMatch[4].trim();
+        if (providerName.includes('ZUQUECA')) providerName = 'AZUQUECA';
+      }
+
+      // Extraer buffer de página individual para el montaje maestro
+      let singleBuf = null;
+      try {
         const singleDoc = await PDFDocument.create();
-        const [copiedPage] = await singleDoc.copyPages(srcDoc, [pageIdx]);
-        singleDoc.addPage(copiedPage);
-        const pageBuf = Buffer.from(await singleDoc.save());
-
-        let pageText = '';
-        try {
-          pageText = await ocrAlbaranDualOrientation(pageBuf);
-        } catch (e) {
-          try {
-            pageText = await processScannedPdfPages(pageBuf);
-          } catch (err) {
-            pageText = '';
-          }
-        }
-
-        const poMatch = pageText.match(/(?:PO|PEDIDO|COMPRAS)?\s*\n?\s*(180[0-9]{7}|176[0-9]{7}|45[0-9]{8}|46[0-9]{8}|[0-9]{10})/i);
-        const docNumberFull = poMatch ? poMatch[1] : '';
-        const docNumberLast4 = docNumberFull ? docNumberFull.slice(-4) : '';
-
-        const detailMatch = pageText.match(/([DC])\s*(0[1-9])\s*([A-Z0-9]{4,5})\s*([^\n\r]+)/);
-        let controlType = 'D', section = '', providerName = '';
-        if (detailMatch) {
-          controlType = detailMatch[1];
-          section = detailMatch[2];
-          providerName = detailMatch[4].trim();
-        }
-
-        extractedItems.push({
-          pageIndex: pageIdx + 1,
-          controlType,
-          controlLabel: controlType === 'C' ? 'C' : 'D',
-          section,
-          docNumberFull,
-          docNumberLast4,
-          providerName,
-          rawLine: pageText.substring(0, 300)
-        });
+        const [cp] = await singleDoc.copyPages(srcDoc, [pageIdx]);
+        singleDoc.addPage(cp);
+        singleBuf = Buffer.from(await singleDoc.save());
+      } catch (err) {
+        console.error(`Error extrayendo buffer de página BR1 ${pageIdx + 1}:`, err);
       }
+
+      extractedItems.push({
+        pageIndex: pageIdx + 1,
+        controlType,
+        controlLabel: controlType === 'C' ? 'C' : 'D',
+        section,
+        docNumberFull,
+        docNumberLast4,
+        providerName,
+        buffer: singleBuf,
+        rawLine: pText.substring(0, 300)
+      });
     }
 
     return {
