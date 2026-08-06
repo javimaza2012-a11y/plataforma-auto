@@ -1,3 +1,11 @@
+console.log('[STARTUP] Initializing PlataformaAUTO server...');
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+});
+
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -5,15 +13,13 @@ const fs = require('fs');
 const cors = require('cors');
 const AdmZip = require('adm-zip');
 
-const { parseRecapitulativo, parseAlbaran, parseBR1, mergePDFs, annotateRecapitulativo } = require('./pdfProcessor');
-const { printPDF, getPrinters } = require('./printerService');
+console.log('[STARTUP] Core express modules loaded.');
 
-process.on('uncaughtException', (err) => {
-  console.error('[UNCAUGHT EXCEPTION]', err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[UNHANDLED REJECTION]', reason);
-});
+const { parseRecapitulativo, parseAlbaran, parseBR1, mergePDFs, annotateRecapitulativo } = require('./pdfProcessor');
+console.log('[STARTUP] pdfProcessor loaded.');
+
+const { printPDF, getPrinters } = require('./printerService');
+console.log('[STARTUP] printerService loaded.');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
