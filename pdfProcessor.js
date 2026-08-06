@@ -2,7 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { PDFDocument } = require('pdf-lib');
 const { createWorker } = require('tesseract.js');
-const pdfParse = require('pdf-parse');
+let pdfParse = null;
+try {
+  pdfParse = require('pdf-parse');
+} catch (e) {
+  console.warn('[PDF-PARSE] Safe load fallback:', e.message);
+}
 
 let mupdfModule = null;
 async function getMupdf() {
