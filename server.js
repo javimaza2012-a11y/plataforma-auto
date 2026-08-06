@@ -309,25 +309,44 @@ app.post('/api/generate-master-print', async (req, res) => {
         console.log(`[MASTER PRINT] 🔄 Pedido ${order}: Albarán usuario descartado (Sin Desc/EAN), buscando en proveedor del Flete...`);
       }
 
-      // Si no se encontró albarán usuario (o fue descartado), buscar en proveedor del flete
+      // Si no se encontró albarán usuario con artículos (o fue descartado), buscar en proveedor del flete
       if (!addedAlbaran) {
-        // Buscar por nº de pedido en los albaranes de proveedor del flete
-        albItem = (currentSession.fleteProviderAlbaranes || []).find(p => p.extractedOrder === order);
+        const expectedProvider = br1Item && br1Item.providerName ? br1Item.providerName.toUpperCase().trim() : '';
 
-        // Si no se encontró por pedido exacto, intentar buscar por los últimos 4 dígitos
+        // 1. Coincidencia por nº de pedido Y nombre de proveedor
+        if (expectedProvider) {
+          albItem = (currentSession.fleteProviderAlbaranes || []).find(p => {
+            const matchOrder = (p.extractedOrder === order) || (p.extractedOrder && p.extractedOrder.slice(-4) === orderLast4);
+            if (!matchOrder) return false;
+            const pName = (p.providerName || '').toUpperCase();
+            const pText = (p.rawText || '').toUpperCase();
+            return pName.includes(expectedProvider) || pText.includes(expectedProvider) || expectedProvider.includes(pName);
+          });
+        }
+
+        // 2. Si no coincide con el proveedor, coincidir solo por nº de pedido
         if (!albItem) {
-          albItem = (currentSession.fleteProviderAlbaranes || []).find(p => 
-            p.extractedOrder && p.extractedOrder.slice(-4) === orderLast4
+          albItem = (currentSession.fleteProviderAlbaranes || []).find(p =>
+            (p.extractedOrder === order) || (p.extractedOrder && p.extractedOrder.slice(-4) === orderLast4)
           );
+        }
+
+        // 3. Coincidir por proveedor si no hubo coincidencia de pedido
+        if (!albItem && expectedProvider && expectedProvider !== 'AZUQUECA') {
+          albItem = (currentSession.fleteProviderAlbaranes || []).find(p => {
+            const pName = (p.providerName || '').toUpperCase();
+            const pText = (p.rawText || '').toUpperCase();
+            return (pName && pName.includes(expectedProvider)) || (pText && pText.includes(expectedProvider));
+          });
         }
 
         if (albItem && albItem.buffer) {
           pdfBuffers.push(albItem.buffer);
           addedAlbaran = true;
           albSource = 'Proveedor del Flete';
-          console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán proveedor del Flete encontrado (${albItem.filename}, pedido extraído: ${albItem.extractedOrder})`);
+          console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán proveedor del Flete encontrado (${albItem.filename}, Prov: ${albItem.providerName || expectedProvider})`);
         } else {
-          console.log(`[MASTER PRINT] ⚠️ Pedido ${order}: SIN ALBARÁN (ni usuario ni proveedor del flete)`);
+          console.log(`[MASTER PRINT] ⚠️ Pedido ${order}: SIN ALBARÁN (ni usuario con artículos ni proveedor del flete)`);
         }
       }
 

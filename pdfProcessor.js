@@ -107,6 +107,20 @@ async function extractAndGroupProviderAlbaranes(pdfBuffer, endOfReportPageIndex,
     }
 
     const textUpper = pageText.toUpperCase();
+    let pageProvider = '';
+    const provMatch = pageText.match(/(?:PROVEEDOR|TRANSPORTISTA|SOCIEDAD|PROV)[:\s]*([^\n\r]+)/i);
+    if (provMatch) {
+      pageProvider = provMatch[1].trim();
+    } else {
+      if (textUpper.includes('PUERTAS PROMA')) pageProvider = 'PUERTAS PROMA SA';
+      else if (textUpper.includes('PLASTICOS REVI')) pageProvider = 'PLASTICOS REVI TUBO S';
+      else if (textUpper.includes('MOLECOR')) pageProvider = 'MOLECOR CANALIZACIO';
+      else if (textUpper.includes('CODEBA')) pageProvider = 'CODEBA SL';
+      else if (textUpper.includes('SANELEC')) pageProvider = 'SANELEC LOGISTICA SL';
+      else if (textUpper.includes('FUTURBANO')) pageProvider = 'FUTURBANO SL';
+      else if (textUpper.includes('AZUQUECA')) pageProvider = 'AZUQUECA';
+    }
+
     const isExplicitPage1 = /\b(PAGINA|PAG|HOJA)\s*1\b/.test(textUpper) || /\b1\s*\/\s*\d+\b/.test(textUpper);
 
     // 4. Determinar si esta página inicia un nuevo albarán de proveedor o continúa el actual
@@ -121,15 +135,21 @@ async function extractAndGroupProviderAlbaranes(pdfBuffer, endOfReportPageIndex,
       currentGroup = {
         docIndex: providerDocs.length + 1,
         extractedOrder: pageOrder,
+        providerName: pageProvider,
+        rawText: pageText,
         pages: [pIdx],
         pageCount: 1
       };
-      console.log(`[RECAP PROVEEDOR] 📄 Inicio de documento #${currentGroup.docIndex} en Página ${pIdx + 1} -> Pedido: ${pageOrder}`);
+      console.log(`[RECAP PROVEEDOR] 📄 Inicio de documento #${currentGroup.docIndex} en Página ${pIdx + 1} -> Pedido: ${pageOrder}, Prov: ${pageProvider || 'N/A'}`);
     } else {
       currentGroup.pages.push(pIdx);
       currentGroup.pageCount++;
+      currentGroup.rawText += '\n' + pageText;
       if (currentGroup.extractedOrder === 'N/A' && pageOrder !== 'N/A') {
         currentGroup.extractedOrder = pageOrder;
+      }
+      if (!currentGroup.providerName && pageProvider) {
+        currentGroup.providerName = pageProvider;
       }
       console.log(`[RECAP PROVEEDOR] 📑 Añadida Página ${pIdx + 1} al documento #${currentGroup.docIndex} -> Pedido: ${currentGroup.extractedOrder}`);
     }
@@ -157,6 +177,8 @@ async function extractAndGroupProviderAlbaranes(pdfBuffer, endOfReportPageIndex,
       status: 'VÁLIDO (PROVEEDOR)',
       reason: `Albarán de proveedor (${group.pageCount} pág${group.pageCount > 1 ? 's' : ''})`,
       extractedOrder: group.extractedOrder,
+      providerName: group.providerName || '',
+      rawText: group.rawText || '',
       isProvider: true,
       pageCount: group.pageCount
     });
@@ -452,56 +474,50 @@ async function parseAlbaran(pdfBuffer, filename) {
       }
     }
 
-    // 2. Comprobar si contiene "Sin Descripcion" o "Sin EAN" explícitamente
-    //    Estos albaranes se descartan pero se marca su pedido para buscar
-    //    el albarán de proveedor correspondiente en el flete
+    // 2. Comprobar si contiene "Sin Descripcion", "Sin EAN", "Sin Sección" o si carece de líneas de artículos
     const containsSinDescripcion = normalizedText.includes('SIN DESCRIPCION') || 
                                     normalizedText.includes('S/DESCRIPCION');
 
     const containsSinEAN = normalizedText.includes('SIN EAN') ||
                            normalizedText.includes('S/EAN');
 
-    if (containsSinDescripcion || containsSinEAN) {
+    const containsSinSeccion = normalizedText.includes('SIN SECCION');
+
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const productLinePattern = /\d{5,8}\s*[\|¦:.\s]\s*\S+/;
+    const hasProductLines = lines.some(line => productLinePattern.test(line));
+
+    // Si contiene "Sin Descripción", "Sin EAN", "Sin Sección", o no tiene detalle de artículos -> DESCARTAR
+    const isInvalid = containsSinDescripcion || containsSinEAN || containsSinSeccion || !hasProductLines;
+
+    if (isInvalid) {
       const reasons = [];
       if (containsSinDescripcion) reasons.push('"Sin Descripcion"');
       if (containsSinEAN) reasons.push('"Sin EAN"');
-      
-      console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → ${reasons.join(' y ')} → Se buscará albarán de proveedor del Flete para pedido ${extractedOrder}`);
+      if (containsSinSeccion) reasons.push('"Sin Sección"');
+      if (!hasProductLines) reasons.push('Sin detalle de artículos');
+
+      console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → ${reasons.join(', ')} → Se usará albarán de proveedor del Flete para pedido ${extractedOrder}`);
       return {
         filename,
         isValid: false,
         needsProviderFallback: true,
         status: 'DESCARTADO',
-        reason: `Contiene ${reasons.join(' y ')} → Se usará albarán de proveedor del Flete`,
+        reason: `Sin detalle de artículos (${reasons.join(', ')})`,
         extractedOrder,
         textPreview: text.substring(0, 500)
       };
     }
 
-    // 3. Si tiene un nº de pedido válido (del nombre de archivo o texto OCR), ACEPTAR
-    //    La confianza está en el nombre de archivo que genera DKV con el nº de pedido real
-    if (extractedOrder !== 'N/A') {
-      // Verificar si tiene líneas de artículos detectables (para logging, NO para descarte)
-      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-      const productLinePattern = /\d{5,8}\s*[\|¦:.\s]\s*\S+/;
-      const hasProductLines = lines.some(line => productLinePattern.test(line));
-      const hasSinSeccion = normalizedText.includes('SIN SECCION');
-
-      if (!hasProductLines && hasSinSeccion) {
-        console.log(`[ALBARAN] ⚠️ ACEPTADO CON AVISO "${filename}" → Pedido: ${extractedOrder} (Sin Seccion en texto pero pedido válido en nombre)`);
-      } else {
-        console.log(`[ALBARAN] ✅ VÁLIDO "${filename}" → Pedido: ${extractedOrder}`);
-      }
-
-      return {
-        filename,
-        isValid: true,
-        status: 'VÁLIDO',
-        reason: hasProductLines ? 'Albarán correcto con detalle de artículos' : 'Albarán aceptado por nº de pedido válido',
-        extractedOrder,
-        textPreview: text.substring(0, 500)
-      };
-    }
+    console.log(`[ALBARAN] ✅ VÁLIDO "${filename}" → Pedido: ${extractedOrder}`);
+    return {
+      filename,
+      isValid: true,
+      status: 'VÁLIDO',
+      reason: 'Albarán válido con detalle de artículos',
+      extractedOrder,
+      textPreview: text.substring(0, 500)
+    };
 
     // 4. Sin nº de pedido y sin líneas de artículos → DESCARTAR
     console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → Sin nº de pedido identificable`);
