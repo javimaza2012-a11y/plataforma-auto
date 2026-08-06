@@ -375,8 +375,8 @@ app.get('/api/historico', (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
-  console.log(`🚀 PlataformaAUTO escuchando en http://localhost:${PORT}`);
+  console.log(`🚀 PlataformaAUTO escuchando en http://0.0.0.0:${PORT}`);
   console.log(`====================================================`);
 });
