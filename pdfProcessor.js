@@ -453,7 +453,8 @@ async function parseAlbaran(pdfBuffer, filename) {
     }
 
     // 2. Comprobar si contiene "Sin Descripcion" o "Sin EAN" explícitamente
-    //    SOLO estos son motivo de descarte real
+    //    Estos albaranes se descartan pero se marca su pedido para buscar
+    //    el albarán de proveedor correspondiente en el flete
     const containsSinDescripcion = normalizedText.includes('SIN DESCRIPCION') || 
                                     normalizedText.includes('S/DESCRIPCION');
 
@@ -465,12 +466,13 @@ async function parseAlbaran(pdfBuffer, filename) {
       if (containsSinDescripcion) reasons.push('"Sin Descripcion"');
       if (containsSinEAN) reasons.push('"Sin EAN"');
       
-      console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → ${reasons.join(' y ')}`);
+      console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → ${reasons.join(' y ')} → Se buscará albarán de proveedor del Flete para pedido ${extractedOrder}`);
       return {
         filename,
         isValid: false,
+        needsProviderFallback: true,
         status: 'DESCARTADO',
-        reason: `Contiene ${reasons.join(' y ')} en los artículos`,
+        reason: `Contiene ${reasons.join(' y ')} → Se usará albarán de proveedor del Flete`,
         extractedOrder,
         textPreview: text.substring(0, 500)
       };

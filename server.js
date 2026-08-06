@@ -153,6 +153,7 @@ app.post('/api/albaranes', upload.array('albaranesFiles', 200), async (req, res)
 
     const results = [];
     const validUserAlbaranes = [];
+    const ordersNeedingProviderFallback = [];
 
     for (const file of pdfFiles) {
       const parsed = await parseAlbaran(file.buffer, file.originalname);
@@ -165,10 +166,15 @@ app.post('/api/albaranes', upload.array('albaranesFiles', 200), async (req, res)
           filename: file.originalname,
           extractedOrder: parsed.extractedOrder
         });
+      } else if (parsed.needsProviderFallback && parsed.extractedOrder !== 'N/A') {
+        ordersNeedingProviderFallback.push(parsed.extractedOrder);
+        console.log(`[ALBARANES] 🔄 Pedido ${parsed.extractedOrder} necesita albarán de proveedor del Flete (${parsed.reason})`);
       }
     }
 
     currentSession.userAlbaranes = validUserAlbaranes;
+    currentSession.ordersNeedingProviderFallback = ordersNeedingProviderFallback;
+    console.log(`[ALBARANES] Pedidos que necesitan fallback a proveedor del Flete: ${ordersNeedingProviderFallback.length > 0 ? ordersNeedingProviderFallback.join(', ') : 'ninguno'}`);
 
     const totalValid = results.filter(r => r.isValid).length;
     const totalDiscarded = results.filter(r => !r.isValid).length;
@@ -253,11 +259,15 @@ app.post('/api/generate-master-print', async (req, res) => {
 
     // 2. Recorrer la secuencia de pedidos en orden estricto del Flete
     const sequence = currentSession.ordersSequence || [];
+    const fallbackOrders = currentSession.ordersNeedingProviderFallback || [];
     const availableUserOrders = (currentSession.userAlbaranes || []).map(a => a.extractedOrder);
     const availableBR1Orders = (currentSession.br1Pages || []).map(b => b.docNumberFull);
+    const availableProviderOrders = (currentSession.fleteProviderAlbaranes || []).map(p => p.extractedOrder);
     console.log(`[MASTER PRINT] Secuencia de pedidos del Flete (${sequence.length}): ${sequence.join(', ')}`);
     console.log(`[MASTER PRINT] Albaranes usuario disponibles (${availableUserOrders.length}): ${availableUserOrders.join(', ')}`);
+    console.log(`[MASTER PRINT] Albaranes proveedor del Flete disponibles (${availableProviderOrders.length}): ${availableProviderOrders.join(', ')}`);
     console.log(`[MASTER PRINT] BR1 disponibles (${availableBR1Orders.length}): ${availableBR1Orders.join(', ')}`);
+    console.log(`[MASTER PRINT] Pedidos con fallback a proveedor (Sin Desc/EAN): ${fallbackOrders.length > 0 ? fallbackOrders.join(', ') : 'ninguno'}`);
 
     for (let i = 0; i < sequence.length; i++) {
       const order = sequence[i];
@@ -280,22 +290,44 @@ app.post('/api/generate-master-print', async (req, res) => {
         console.log(`[MASTER PRINT] ❌ Pedido ${order}: SIN BR1`);
       }
 
-      // B. Albarán correspondiente a este pedido (Pestaña 2 primero, Flete proveedor como fallback)
-      let albItem = (currentSession.userAlbaranes || []).find(a => a.extractedOrder === order);
-      if (albItem && albItem.buffer) {
-        pdfBuffers.push(albItem.buffer);
-        addedAlbaran = true;
-        albSource = 'Albaranes a Flete';
-        console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán usuario encontrado ("${albItem.filename}")`);
+      // B. Albarán correspondiente a este pedido
+      //    Si el albarán usuario fue descartado por Sin Descripción/Sin EAN,
+      //    buscar directamente en los albaranes de proveedor del flete
+      const needsFallback = fallbackOrders.includes(order);
+      let albItem = null;
+
+      if (!needsFallback) {
+        // Buscar primero en albaranes de usuario (solo si no fue descartado)
+        albItem = (currentSession.userAlbaranes || []).find(a => a.extractedOrder === order);
+        if (albItem && albItem.buffer) {
+          pdfBuffers.push(albItem.buffer);
+          addedAlbaran = true;
+          albSource = 'Albaranes a Flete';
+          console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán usuario encontrado ("${albItem.filename}")`);
+        }
       } else {
+        console.log(`[MASTER PRINT] 🔄 Pedido ${order}: Albarán usuario descartado (Sin Desc/EAN), buscando en proveedor del Flete...`);
+      }
+
+      // Si no se encontró albarán usuario (o fue descartado), buscar en proveedor del flete
+      if (!addedAlbaran) {
+        // Buscar por nº de pedido en los albaranes de proveedor del flete
         albItem = (currentSession.fleteProviderAlbaranes || []).find(p => p.extractedOrder === order);
+
+        // Si no se encontró por pedido exacto, intentar buscar por los últimos 4 dígitos
+        if (!albItem) {
+          albItem = (currentSession.fleteProviderAlbaranes || []).find(p => 
+            p.extractedOrder && p.extractedOrder.slice(-4) === orderLast4
+          );
+        }
+
         if (albItem && albItem.buffer) {
           pdfBuffers.push(albItem.buffer);
           addedAlbaran = true;
           albSource = 'Proveedor del Flete';
-          console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán proveedor del Flete encontrado`);
+          console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán proveedor del Flete encontrado (${albItem.filename}, pedido extraído: ${albItem.extractedOrder})`);
         } else {
-          console.log(`[MASTER PRINT] ⚠️ Pedido ${order}: SIN ALBARÁN (ni usuario ni proveedor)`);
+          console.log(`[MASTER PRINT] ⚠️ Pedido ${order}: SIN ALBARÁN (ni usuario ni proveedor del flete)`);
         }
       }
 
