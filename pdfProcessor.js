@@ -416,7 +416,9 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
 
 /**
  * Analiza un PDF de Albarán individual.
- * Descarta albaranes que contengan artículos "Sin Descripcion" / "Sin EAN".
+ * Descarta albaranes SOLO si contienen artículos "Sin Descripcion" / "Sin EAN".
+ * Los albaranes con nº de pedido válido en el nombre de archivo se aceptan siempre
+ * (excepto si tienen los marcadores de descarte explícitos arriba).
  */
 async function parseAlbaran(pdfBuffer, filename) {
   try {
@@ -434,7 +436,7 @@ async function parseAlbaran(pdfBuffer, filename) {
     const textUpper = text.toUpperCase();
     const normalizedText = textUpper.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-    // 1. Intentar extraer el nº de pedido del nombre de archivo (patrón típico DKV)
+    // 1. Extraer el nº de pedido del nombre de archivo (patrón típico DKV: ALBARAN-...-L805052643-...)
     let extractedOrder = 'N/A';
 
     const filenameOrderMatch = filename.match(/(180[0-9]{7}|176[0-9]{7})/);
@@ -451,6 +453,7 @@ async function parseAlbaran(pdfBuffer, filename) {
     }
 
     // 2. Comprobar si contiene "Sin Descripcion" o "Sin EAN" explícitamente
+    //    SOLO estos son motivo de descarte real
     const containsSinDescripcion = normalizedText.includes('SIN DESCRIPCION') || 
                                     normalizedText.includes('S/DESCRIPCION');
 
@@ -473,36 +476,38 @@ async function parseAlbaran(pdfBuffer, filename) {
       };
     }
 
-    // 3. Comprobar si tiene líneas de artículos reales (EAN + descripción de producto)
-    //    Los albaranes válidos tienen líneas tipo: "10037104 | TUBO RIGIDO PVC ... 8248601889..."
-    //    Los inválidos tienen "Seccion: Sin Seccion" y NO tienen estas líneas de producto
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    
-    // Buscar líneas que contengan un código de artículo seguido de un nombre de producto
-    const productLinePattern = /\d{7,8}\s*[\|¦]\s*\S+/; // código de 7-8 dígitos + separador + texto
-    const hasProductLines = lines.some(line => productLinePattern.test(line));
+    // 3. Si tiene un nº de pedido válido (del nombre de archivo o texto OCR), ACEPTAR
+    //    La confianza está en el nombre de archivo que genera DKV con el nº de pedido real
+    if (extractedOrder !== 'N/A') {
+      // Verificar si tiene líneas de artículos detectables (para logging, NO para descarte)
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      const productLinePattern = /\d{5,8}\s*[\|¦:.\s]\s*\S+/;
+      const hasProductLines = lines.some(line => productLinePattern.test(line));
+      const hasSinSeccion = normalizedText.includes('SIN SECCION');
 
-    // También verificar si la sección es "Sin Seccion" (indicador de albarán vacío)
-    const hasSinSeccion = normalizedText.includes('SIN SECCION');
+      if (!hasProductLines && hasSinSeccion) {
+        console.log(`[ALBARAN] ⚠️ ACEPTADO CON AVISO "${filename}" → Pedido: ${extractedOrder} (Sin Seccion en texto pero pedido válido en nombre)`);
+      } else {
+        console.log(`[ALBARAN] ✅ VÁLIDO "${filename}" → Pedido: ${extractedOrder}`);
+      }
 
-    if (!hasProductLines) {
-      console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → Sin líneas de artículos (Sin Seccion: ${hasSinSeccion})`);
       return {
         filename,
-        isValid: false,
-        status: 'DESCARTADO',
-        reason: 'Albarán sin artículos (Sin Descripcion / Sin EAN)',
+        isValid: true,
+        status: 'VÁLIDO',
+        reason: hasProductLines ? 'Albarán correcto con detalle de artículos' : 'Albarán aceptado por nº de pedido válido',
         extractedOrder,
         textPreview: text.substring(0, 500)
       };
     }
 
-    console.log(`[ALBARAN] ✅ VÁLIDO "${filename}" → Pedido: ${extractedOrder}`);
+    // 4. Sin nº de pedido y sin líneas de artículos → DESCARTAR
+    console.log(`[ALBARAN] ❌ DESCARTADO "${filename}" → Sin nº de pedido identificable`);
     return {
       filename,
-      isValid: true,
-      status: 'VÁLIDO',
-      reason: 'Albarán correcto con detalle de artículos',
+      isValid: false,
+      status: 'DESCARTADO',
+      reason: 'Albarán sin nº de pedido identificable',
       extractedOrder,
       textPreview: text.substring(0, 500)
     };

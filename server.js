@@ -253,6 +253,11 @@ app.post('/api/generate-master-print', async (req, res) => {
 
     // 2. Recorrer la secuencia de pedidos en orden estricto del Flete
     const sequence = currentSession.ordersSequence || [];
+    const availableUserOrders = (currentSession.userAlbaranes || []).map(a => a.extractedOrder);
+    const availableBR1Orders = (currentSession.br1Pages || []).map(b => b.docNumberFull);
+    console.log(`[MASTER PRINT] Secuencia de pedidos del Flete (${sequence.length}): ${sequence.join(', ')}`);
+    console.log(`[MASTER PRINT] Albaranes usuario disponibles (${availableUserOrders.length}): ${availableUserOrders.join(', ')}`);
+    console.log(`[MASTER PRINT] BR1 disponibles (${availableBR1Orders.length}): ${availableBR1Orders.join(', ')}`);
 
     for (let i = 0; i < sequence.length; i++) {
       const order = sequence[i];
@@ -270,6 +275,9 @@ app.post('/api/generate-master-print', async (req, res) => {
       if (br1Item && br1Item.buffer) {
         pdfBuffers.push(br1Item.buffer);
         addedBR1 = true;
+        console.log(`[MASTER PRINT] ✅ Pedido ${order}: BR1 encontrado (Sec ${br1Item.section}, ${br1Item.controlType}, ${br1Item.providerName})`);
+      } else {
+        console.log(`[MASTER PRINT] ❌ Pedido ${order}: SIN BR1`);
       }
 
       // B. Albarán correspondiente a este pedido (Pestaña 2 primero, Flete proveedor como fallback)
@@ -278,12 +286,16 @@ app.post('/api/generate-master-print', async (req, res) => {
         pdfBuffers.push(albItem.buffer);
         addedAlbaran = true;
         albSource = 'Albaranes a Flete';
+        console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán usuario encontrado ("${albItem.filename}")`);
       } else {
         albItem = (currentSession.fleteProviderAlbaranes || []).find(p => p.extractedOrder === order);
         if (albItem && albItem.buffer) {
           pdfBuffers.push(albItem.buffer);
           addedAlbaran = true;
           albSource = 'Proveedor del Flete';
+          console.log(`[MASTER PRINT] ✅ Pedido ${order}: Albarán proveedor del Flete encontrado`);
+        } else {
+          console.log(`[MASTER PRINT] ⚠️ Pedido ${order}: SIN ALBARÁN (ni usuario ni proveedor)`);
         }
       }
 
