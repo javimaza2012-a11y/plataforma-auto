@@ -399,7 +399,8 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
   const worker = await createWorker('spa');
   await worker.setParameters({ tessedit_pageseg_mode: '6' });
 
-  const angles = [0, 270]; // Solo 2 orientaciones principales (reducido de 4 para velocidad)
+  // Probar las 4 orientaciones posibles (0°, 180°, 270°, 90°)
+  const angles = [0, 180, 270, 90];
   let bestText = '';
   let maxScore = -1;
   let bestAngle = 0;
@@ -408,7 +409,7 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
   const orderNumberPattern = /\b(180[0-9]{7}|176[0-9]{7})\b/;
 
   for (const deg of angles) {
-    const matScale = mupdf.Matrix.scale(1.5, 1.5); // Reducido de 2.5 para velocidad
+    const matScale = mupdf.Matrix.scale(2.0, 2.0); // 2.0x para resolución óptima
     const matRot = mupdf.Matrix.rotate(deg);
     const matrix = mupdf.Matrix.concat(matScale, matRot);
 
@@ -427,8 +428,8 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
       bestAngle = deg;
     }
 
-    // Si ya encontramos un ángulo con pedido, no probar más
-    if (score >= 10) break;
+    // Si encontramos el nº de pedido y buenas palabras clave, no probar más ángulos
+    if (orderNumberPattern.test(text) && score >= 10) break;
   }
 
   await worker.terminate();
