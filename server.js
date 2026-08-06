@@ -331,14 +331,30 @@ app.post('/api/generate-master-print', async (req, res) => {
           });
         }
 
-        // 3. Coincidir por proveedor (si no es el genérico AZUQUECA)
+        // 3. Coincidir por proveedor (solo si el albarán NO pertenece explícitamente a otro pedido conocido)
         if (fleteIdx < 0 && expectedProvider && expectedProvider !== 'AZUQUECA') {
           fleteIdx = (currentSession.fleteProviderAlbaranes || []).findIndex((p, idx) => {
             if (usedAlbaranKeys.has(`flete_${idx}`)) return false;
+            if (p.extractedOrder && p.extractedOrder !== 'N/A' && p.extractedOrder !== order && p.extractedOrder.slice(-4) !== orderLast4) {
+              return false;
+            }
             const pName = (p.providerName || '').toUpperCase();
             const pText = (p.rawText || '').toUpperCase();
             return (pName && pName.includes(expectedProvider)) || (pText && pText.includes(expectedProvider));
           });
+        }
+
+        // 4. Fallback por posición secuencial (los albaranes del flete siguen el mismo orden de la transmisión)
+        if (fleteIdx < 0) {
+          const fleteList = currentSession.fleteProviderAlbaranes || [];
+          if (i < fleteList.length && !usedAlbaranKeys.has(`flete_${i}`)) {
+            const pCandidate = fleteList[i];
+            const pOrder = pCandidate.extractedOrder || 'N/A';
+            if (pOrder === 'N/A' || pOrder === order || pOrder.slice(-4) === orderLast4) {
+              fleteIdx = i;
+              console.log(`[MASTER PRINT] 🎯 Coincidencia por posición secuencial #${i + 1} para pedido ${order}`);
+            }
+          }
         }
 
         if (fleteIdx >= 0) {
