@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Storage & Temporary Files
+historico/*.pdf
+uploads_temp/*
+debug_*.pdf
+page_*.png
+test_*.png
+test_*.pdf
+page2_2.5x.png
+auto_annotated_*.png
+auto_annotated_*.pdf
+scratch_*.js
+
+# Environment & Logs
+*.log
+.DS_Store

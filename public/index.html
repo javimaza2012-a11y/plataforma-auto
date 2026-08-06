@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="PlataformaAUTO - Gestor inteligente de recapitulativos DKV para SAP y filtrado de albaranes de logística.">
+  <title>PlataformaAUTO | DKV Logistics & SAP Hub</title>
+
+  <!-- Google Fonts: Outfit & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="logo-badge">
+        <i class="fa-solid fa-truck-fast"></i>
+      </div>
+      <div>
+        <h1 class="brand-title">Plataforma<span>AUTO</span></h1>
+        <p class="brand-subtitle">DKV Logistics & SAP Automation</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="status-indicator">
+        <span class="status-dot green"></span>
+        <span class="status-text">Servidor Activo (Madrid)</span>
+      </div>
+      <button id="btn-refresh-history" class="btn btn-secondary btn-icon" title="Ver Histórico de PDFs">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        <span>Histórico</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+
+    <!-- Tab Navigation -->
+    <nav class="tab-navigation" aria-label="Secciones de automatización">
+      <button id="tab-btn-recap" class="tab-btn active" onclick="switchTab('recap')">
+        <i class="fa-solid fa-truck-ramp-box"></i>
+        <span>1. Flete</span>
+      </button>
+      <button id="tab-btn-albaranes" class="tab-btn" onclick="switchTab('albaranes')">
+        <i class="fa-solid fa-folder-open"></i>
+        <span>2. Albaranes a Flete</span>
+      </button>
+      <button id="tab-btn-br1" class="tab-btn" onclick="switchTab('br1')">
+        <i class="fa-solid fa-file-circle-check"></i>
+        <span>3. BR1</span>
+      </button>
+      <button id="tab-btn-print" class="tab-btn" onclick="switchTab('print')">
+        <i class="fa-solid fa-print"></i>
+        <span>4. Generar Impresión</span>
+      </button>
+    </nav>
+
+    <!-- TAB 1: FLETE -->
+    <section id="tab-recap" class="tab-content active">
+      <div class="section-intro">
+        <h2><i class="fa-solid fa-truck-ramp-box"></i> 1. Flete — Extracción de Pedidos para SAP y Conteo de Palés</h2>
+        <p>Arrastra el PDF del recapitulativo diario de DKV. El sistema filtrará la carta de porte y extraerá los pedidos cliente para pegado directo en masa en SAP.</p>
+      </div>
+
+      <div class="drop-zone-card" id="drop-zone-recap">
+        <input type="file" id="input-file-recap" accept=".pdf,.zip" class="file-input-hidden">
+        <div class="drop-zone-content">
+          <div class="icon-circle">
+            <i class="fa-solid fa-file-pdf"></i>
+          </div>
+          <h3>Arrastra aquí el PDF o ZIP del Recapitulativo DKV</h3>
+          <p>O haz clic para seleccionar desde tu equipo</p>
+          <span class="badge-tag">Formatos soportados: PDF o ZIP (descargado de Gmail)</span>
+        </div>
+        <div id="loader-recap" class="loader-overlay hidden">
+          <div class="spinner"></div>
+          <p>Procesando páginas de transmisión y extrayendo pedidos...</p>
+        </div>
+      </div>
+
+      <!-- Results Grid (Hidden by default) -->
+      <div id="results-recap" class="results-container hidden">
+        <div class="kpi-grid">
+          <div class="kpi-card highlight-blue">
+            <div class="kpi-icon"><i class="fa-solid fa-list-check"></i></div>
+            <div class="kpi-data">
+              <span id="kpi-total-orders" class="kpi-number">0</span>
+              <span class="kpi-label">Pedidos Cliente Extraídos</span>
+            </div>
+          </div>
+          <div class="kpi-card highlight-emerald">
+            <div class="kpi-icon"><i class="fa-solid fa-cubes-stacked"></i></div>
+            <div class="kpi-data">
+              <span id="kpi-total-pallets" class="kpi-number">0</span>
+              <span class="kpi-label">Total Soportes Detectados</span>
+            </div>
+          </div>
+          <div class="kpi-card highlight-purple">
+            <div class="kpi-icon"><i class="fa-solid fa-file-arrow-up"></i></div>
+            <div class="kpi-data">
+              <span id="recap-file-name" class="kpi-number text-truncate">archivo.pdf</span>
+              <span class="kpi-label">Documento Procesado</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-split-view">
+          <!-- Left: SAP Copy Box -->
+          <div class="card sap-card">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-paste"></i> Listado Limpio para Entrada en Masa en SAP</h3>
+              <button id="btn-copy-sap" class="btn btn-primary btn-pulse" onclick="copySapList()">
+                <i class="fa-solid fa-copy"></i>
+                <span>Copiar Lista (1-Clic)</span>
+              </button>
+            </div>
+            <div class="card-body">
+              <textarea id="textarea-sap" class="sap-textarea" readonly placeholder="Los números de pedido aparecerán aquí limpios, uno por línea..."></textarea>
+              <div class="alert-info">
+                <i class="fa-solid fa-circle-info"></i>
+                <span>Listo para hacer <code>Ctrl + V</code> en la ventana de selección de pedidos en masa de SAP.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Soporte Breakdown Table -->
+          <div class="card pallets-card">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-layer-group"></i> Desglose de Soportes por Pedido</h3>
+              <span class="badge-sm">Soportes por pedido</span>
+            </div>
+            <div class="card-body table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Nº Pedido Cliente</th>
+                    <th>Soportes</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-pallets">
+                  <!-- Dynamic rows -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: ALBARANES A FLETE -->
+    <section id="tab-albaranes" class="tab-content">
+      <div class="section-intro">
+        <h2><i class="fa-solid fa-folder-open"></i> 2. Albaranes a Flete</h2>
+        <p>Arrastra los PDFs de los albaranes recibidos en el correo. El sistema analizará el contenido, descartará automáticamente los albaranes con la denominación <strong>"sin especificar"</strong> e imprimirá únicamente los albaranes válidos.</p>
+      </div>
+
+      <div class="drop-zone-card" id="drop-zone-albaranes">
+        <input type="file" id="input-files-albaranes" accept=".pdf,.zip" multiple class="file-input-hidden">
+        <div class="drop-zone-content">
+          <div class="icon-circle icon-orange">
+            <i class="fa-solid fa-folder-open"></i>
+          </div>
+          <h3>Arrastra aquí el ZIP de Gmail o los PDFs de albaranes</h3>
+          <p>En Gmail: "Descargar todos los adjuntos" → arrastra el ZIP aquí directamente</p>
+          <span class="badge-tag">Acepta ZIP o PDFs sueltos · Filtrado automático de "sin especificar"</span>
+        </div>
+        <div id="loader-albaranes" class="loader-overlay hidden">
+          <div class="spinner"></div>
+          <p>Analizando contenido de albaranes, filtrando descripciones y unificando PDF...</p>
+        </div>
+      </div>
+
+      <!-- Albaranes Results (Hidden by default) -->
+      <div id="results-albaranes" class="results-container hidden">
+        <div class="actions-bar">
+          <div class="batch-summary-pills">
+            <span class="pill green"><i class="fa-solid fa-circle-check"></i> <strong id="count-valid">0</strong> Válidos para imprimir</span>
+            <span class="pill red"><i class="fa-solid fa-circle-xmark"></i> <strong id="count-discarded">0</strong> Descartados ("sin especificar")</span>
+          </div>
+
+          <div class="actions-group">
+            <button id="btn-print-valid" class="btn btn-emerald btn-lg" onclick="printValidBatch()">
+              <i class="fa-solid fa-print"></i>
+              <span>Imprimir Válidos en Impresora</span>
+            </button>
+            <a id="link-download-merged" href="#" target="_blank" class="btn btn-secondary btn-lg hidden">
+              <i class="fa-solid fa-file-pdf"></i>
+              <span>Descargar PDF Unificado</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-list"></i> Resultado del Análisis de Albaranes</h3>
+          </div>
+          <div class="card-body table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Estado</th>
+                  <th>Nombre del Archivo PDF</th>
+                  <th>Pedido Detectado</th>
+                  <th>Motivo / Diagnóstico</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-albaranes">
+                <!-- Dynamic rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: BR1 (Documentos de Descarga SAP) -->
+    <section id="tab-br1" class="tab-content">
+      <div class="section-intro">
+        <h2><i class="fa-solid fa-file-circle-check"></i> 3. BR1 — Documentos de Descarga SAP</h2>
+        <p>Arrastra aquí el PDF del documento de descarga generado en SAP tras procesar los albaranes. El sistema identificará el tipo de control (<strong>D</strong> directo / <strong>C</strong> conteo), la sección (<strong>01 a 09</strong>) y los <strong>últimos 4 dígitos</strong> del documento de compra.</p>
+      </div>
+
+      <div class="drop-zone-card" id="drop-zone-br1">
+        <input type="file" id="input-file-br1" accept=".pdf,.zip" class="file-input-hidden">
+        <div class="drop-zone-content">
+          <div class="icon-circle icon-blue">
+            <i class="fa-solid fa-file-circle-check"></i>
+          </div>
+          <h3>Arrastra aquí el PDF del Documento de Descarga BR1 de SAP</h3>
+          <p>O haz clic para seleccionar desde tu equipo</p>
+          <span class="badge-tag">Extracción de Tipo de Control (D/C) · Sección (01-09) · Doc. Compra (últimos 4 dígitos)</span>
+        </div>
+        <div id="loader-br1" class="loader-overlay hidden">
+          <div class="spinner"></div>
+          <p>Procesando documento BR1 de SAP y analizando controles...</p>
+        </div>
+      </div>
+
+      <!-- BR1 Results (Hidden by default) -->
+      <div id="results-br1" class="results-container hidden">
+        <div class="kpi-grid">
+          <div class="kpi-card highlight-blue">
+            <div class="kpi-icon"><i class="fa-solid fa-list-check"></i></div>
+            <div class="kpi-data">
+              <span id="kpi-br1-total" class="kpi-number">0</span>
+              <span class="kpi-label">Registros Extraídos</span>
+            </div>
+          </div>
+          <div class="kpi-card highlight-emerald">
+            <div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="kpi-data">
+              <span id="kpi-br1-direct" class="kpi-number">0</span>
+              <span class="kpi-label">Control Directo (D)</span>
+            </div>
+          </div>
+          <div class="kpi-card highlight-purple">
+            <div class="kpi-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+            <div class="kpi-data">
+              <span id="kpi-br1-conteo" class="kpi-number">0</span>
+              <span class="kpi-label">Control Conteo (C)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-table-list"></i> Datos Extraídos del Documento BR1</h3>
+            <span id="br1-file-name" class="badge-sm">archivo.pdf</span>
+          </div>
+          <div class="card-body table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Tipo de Control</th>
+                  <th>Sección</th>
+                  <th>Doc. Compra (Últimos 4 dígitos)</th>
+                  <th>Nombre del Proveedor</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-br1">
+                <!-- Dynamic rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: GENERAR IMPRESIÓN -->
+    <section id="tab-print" class="tab-content">
+      <div class="section-intro">
+        <h2><i class="fa-solid fa-print"></i> 4. Generar Impresión</h2>
+        <p>Genera el lote maestro de impresión ensamblado en la secuencia estricta del Flete: <strong>Carta de porte y Recapitulativo inicial</strong>, seguido de cada pedido con su <strong>BR1 + Albarán correspondiente</strong> (de Pestaña 2 o del Flete).</p>
+      </div>
+
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <h3><i class="fa-solid fa-gears"></i> Generación y Control de Lote de Impresión</h3>
+          <span class="badge-sm" style="background:rgba(16,185,129,0.2); color:var(--accent-emerald);">Secuencia Estricta de Flete</span>
+        </div>
+        <div class="card-body">
+          <div class="actions-group" style="justify-content: flex-start; gap: 1rem; margin-bottom: 1.5rem;">
+            <button id="btn-generate-master" class="btn btn-primary btn-lg" onclick="generateMasterPrint()">
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+              <span>Generar Lote Unificado de Impresión</span>
+            </button>
+            <button id="btn-print-master" class="btn btn-emerald btn-lg hidden" onclick="printMasterBatch()">
+              <i class="fa-solid fa-print"></i>
+              <span>Enviar Lote a Impresora Windows</span>
+            </button>
+            <a id="link-download-tab4" href="#" target="_blank" class="btn btn-secondary btn-lg hidden">
+              <i class="fa-solid fa-file-pdf"></i>
+              <span>Descargar PDF Unificado Completo</span>
+            </a>
+          </div>
+
+          <div id="loader-master" class="loader-overlay hidden">
+            <div class="spinner"></div>
+            <p>Ensamblando Carta de Porte, BR1s y Albaranes por pedido...</p>
+          </div>
+
+          <!-- Master Breakdown Container -->
+          <div id="results-master" class="hidden" style="margin-top: 1rem;">
+            <h4><i class="fa-solid fa-layer-group"></i> Estructura del PDF Unificado Generado</h4>
+            <div class="table-responsive" style="margin-top: 0.8rem;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Nº Pedido Cliente (Flete)</th>
+                    <th>Documento BR1</th>
+                    <th>Albarán Adjunto</th>
+                    <th>Origen del Albarán</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-master-breakdown">
+                  <!-- Dynamic breakdown rows -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal Histórico de Lotes -->
+  <div id="modal-historico" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-clock-rotate-left"></i> Histórico de PDFs Unificados</h3>
+        <button class="btn-close-modal" onclick="closeHistoricoModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body table-responsive">
+        <p class="modal-intro">Lotes de albaranes válidos unificados y guardados en el disco duro:</p>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Fecha y Hora</th>
+              <th>Nombre del Archivo</th>
+              <th>Tamaño</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-historico">
+            <!-- Dynamic rows -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast hidden">
+    <i class="fa-solid fa-circle-check toast-icon"></i>
+    <span id="toast-message">Notificación</span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
