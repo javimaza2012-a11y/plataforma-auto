@@ -36,8 +36,8 @@ async function processScannedPdfPages(pdfBuffer) {
 
     const page = doc.loadPage(i);
     
-    // Escala 2.5x + Rotación 180º (formato estándar de las transmisiones escaneadas DKV)
-    const matrix180 = mupdf.Matrix.scale(-2.5, -2.5);
+    // Escala 1.5x + Rotación 180º (formato estándar de las transmisiones escaneadas DKV)
+    const matrix180 = mupdf.Matrix.scale(-1.5, -1.5);
     const pixmap180 = page.toPixmap(matrix180, mupdf.ColorSpace.DeviceRGB, false, true);
     const pngBuffer180 = Buffer.from(pixmap180.asPNG());
     
@@ -46,7 +46,7 @@ async function processScannedPdfPages(pdfBuffer) {
 
     // Si la orientación rotada no devuelve palabras clave de recapitulativo, probar orientación normal 2.5x
     if (!pageText.includes('RECAPITULATIVO') && !pageText.includes('EXPEDICION') && !pageText.includes('PEDIDO') && !pageText.includes('PEDCLIENT') && !pageText.includes('END OF REPORT')) {
-      const matrixNormal = mupdf.Matrix.scale(2.5, 2.5);
+      const matrixNormal = mupdf.Matrix.scale(1.5, 1.5);
       const pixmapNormal = page.toPixmap(matrixNormal, mupdf.ColorSpace.DeviceRGB, false, true);
       const pngBufferNormal = Buffer.from(pixmapNormal.asPNG());
       const resNormal = await worker.recognize(pngBufferNormal);
@@ -183,12 +183,14 @@ async function parseRecapitulativo(pdfBuffer) {
   let fullExtractedText = '';
   let endOfReportPageIndex = -1;
   const recapBboxesByPage = {};
+  const OCR_SCALE = 2.0; // Reducido de 3.0 para mayor velocidad en cloud
 
   for (let i = 0; i < pageCount; i++) {
     const page = doc.loadPage(i);
+    console.log(`[OCR] Procesando página ${i + 1}/${pageCount}...`);
     
-    // Escala 3.0x + Rotación 180º (formato estándar de las transmisiones escaneadas DKV)
-    const matrix180 = mupdf.Matrix.scale(-3.0, -3.0);
+    // Escala 2.0x + Rotación 180º (formato estándar de las transmisiones escaneadas DKV)
+    const matrix180 = mupdf.Matrix.scale(-OCR_SCALE, -OCR_SCALE);
     const pixmap180 = page.toPixmap(matrix180, mupdf.ColorSpace.DeviceRGB, false, true);
     const pngBuffer180 = Buffer.from(pixmap180.asPNG());
     
@@ -197,9 +199,9 @@ async function parseRecapitulativo(pdfBuffer) {
     let pageHocr = res180.data.hocr || '';
     let usedAngle = 180;
 
-    // Si la orientación rotada no devuelve palabras clave de recapitulativo, probar orientación normal 3.0x
+    // Si la orientación rotada no devuelve palabras clave de recapitulativo, probar orientación normal
     if (!pageText.includes('RECAPITULATIVO') && !pageText.includes('EXPEDICION') && !pageText.includes('PEDIDO') && !pageText.includes('PEDCLIENT') && !pageText.includes('END OF REPORT')) {
-      const matrixNormal = mupdf.Matrix.scale(3.0, 3.0);
+      const matrixNormal = mupdf.Matrix.scale(OCR_SCALE, OCR_SCALE);
       const pixmapNormal = page.toPixmap(matrixNormal, mupdf.ColorSpace.DeviceRGB, false, true);
       const pngBufferNormal = Buffer.from(pixmapNormal.asPNG());
       const resNormal = await worker.recognize(pngBufferNormal, {}, { hocr: true });
@@ -222,8 +224,8 @@ async function parseRecapitulativo(pdfBuffer) {
       const orderMatch = textClean.match(/\b(180[0-9]{7}|176[0-9]{7})\b/);
       if (orderMatch) {
         const order = orderMatch[1];
-        const py0 = parseInt(y0, 10) / 3.0;
-        const py1 = parseInt(y1, 10) / 3.0;
+        const py0 = parseInt(y0, 10) / OCR_SCALE;
+        const py1 = parseInt(y1, 10) / OCR_SCALE;
         if (!orderBboxes[order]) {
           orderBboxes[order] = { minY: py0, maxY: py1, text: textClean, angle: usedAngle };
         } else {
@@ -375,7 +377,7 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
   const worker = await createWorker('spa');
   await worker.setParameters({ tessedit_pageseg_mode: '6' });
 
-  const angles = [0, 90, 180, 270];
+  const angles = [0, 270]; // Solo 2 orientaciones principales (reducido de 4 para velocidad)
   let bestText = '';
   let maxScore = -1;
   let bestAngle = 0;
@@ -384,7 +386,7 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
   const orderNumberPattern = /\b(180[0-9]{7}|176[0-9]{7})\b/;
 
   for (const deg of angles) {
-    const matScale = mupdf.Matrix.scale(2.5, 2.5);
+    const matScale = mupdf.Matrix.scale(1.5, 1.5); // Reducido de 2.5 para velocidad
     const matRot = mupdf.Matrix.rotate(deg);
     const matrix = mupdf.Matrix.concat(matScale, matRot);
 
@@ -402,6 +404,9 @@ async function ocrAlbaranDualOrientation(pdfBuffer) {
       bestText = text;
       bestAngle = deg;
     }
+
+    // Si ya encontramos un ángulo con pedido, no probar más
+    if (score >= 10) break;
   }
 
   await worker.terminate();
